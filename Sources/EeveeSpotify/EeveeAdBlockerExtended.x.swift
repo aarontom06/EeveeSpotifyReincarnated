@@ -5,8 +5,22 @@
 
 import Orion
 import Foundation
+import UIKit
 
-struct EeveeAdBlockerExtendedGroup: HookGroup {}
+// Every service has its own group. Spotify rolls these modules out
+// independently, so one missing/renamed class must not disable the rest of the
+// blocker on sideloaded/rootless builds either.
+struct AdsServiceImplGroup: HookGroup {}
+struct InStreamAdsServiceGroup: HookGroup {}
+struct EmbeddedNPVServiceGroup: HookGroup {}
+struct LeavebehindAdsBaseServiceGroup: HookGroup {}
+struct LeavebehindAdsBaseInternalServiceGroup: HookGroup {}
+struct SponsoredContextServiceGroup: HookGroup {}
+struct SponsoredContextNPBAttachmentServiceGroup: HookGroup {}
+struct SponsoredPlaylistHeaderServiceGroup: HookGroup {}
+struct SponsoredPlaylistHeaderViewGroup: HookGroup {}
+struct NativeAdsLoggerServiceGroup: HookGroup {}
+struct SponsoredCtxAttachmentGroup: HookGroup {}
 
 private let killAdsServiceImpl         = true
 private let killInStreamAdsService     = true
@@ -21,7 +35,7 @@ private func adlog(_ what: String) {
 }
 
 class AdsServiceImplKill: ClassHook<NSObject> {
-    typealias Group = EeveeAdBlockerExtendedGroup
+    typealias Group = AdsServiceImplGroup
     static let targetName: String = "_TtC19AdsPlatform_AdsImpl14AdsServiceImpl"
     func load() {
         if killAdsServiceImpl { adlog("AdsServiceImpl.load"); return }
@@ -30,7 +44,7 @@ class AdsServiceImplKill: ClassHook<NSObject> {
 }
 
 class InStreamAdsServiceKill: ClassHook<NSObject> {
-    typealias Group = EeveeAdBlockerExtendedGroup
+    typealias Group = InStreamAdsServiceGroup
     static let targetName: String = "_TtC29AdsNowPlaying_InStreamAdsImpl18InStreamAdsService"
     func load() {
         if killInStreamAdsService { adlog("InStreamAdsService.load"); return }
@@ -39,7 +53,7 @@ class InStreamAdsServiceKill: ClassHook<NSObject> {
 }
 
 class EmbeddedNPVServiceImplKill: ClassHook<NSObject> {
-    typealias Group = EeveeAdBlockerExtendedGroup
+    typealias Group = EmbeddedNPVServiceGroup
     static let targetName: String = "_TtC29AdsNowPlaying_EmbeddedNPVImpl22EmbeddedNPVServiceImpl"
     func load() {
         if killEmbeddedNPVService { adlog("EmbeddedNPVServiceImpl.load"); return }
@@ -47,8 +61,86 @@ class EmbeddedNPVServiceImplKill: ClassHook<NSObject> {
     }
 }
 
+// Spotify 9.1.66+ can render the under-player card through a separate
+// "unified leavebehind" pipeline. It does not depend on EmbeddedNPVServiceImpl.
+class LeavebehindAdsBaseServiceKill: ClassHook<NSObject> {
+    typealias Group = LeavebehindAdsBaseServiceGroup
+    static let targetName: String =
+        "_TtC36AdsStandalone_LeavebehindAdsBaseImpl25LeavebehindAdsBaseService"
+
+    func load() {
+        adlog("LeavebehindAdsBaseService.load")
+        return
+    }
+}
+
+class LeavebehindAdsBaseInternalServiceKill: ClassHook<NSObject> {
+    typealias Group = LeavebehindAdsBaseInternalServiceGroup
+    static let targetName: String =
+        "_TtC36AdsStandalone_LeavebehindAdsBaseImpl33LeavebehindAdsBaseInternalService"
+
+    func load() {
+        adlog("LeavebehindAdsBaseInternalService.load")
+        return
+    }
+}
+
+// Native sponsored surfaces are separate from AdsServiceImpl in 9.1.x.
+// Blocking their SPTService entry points keeps sponsored headers and the
+// Now Playing Bar attachment from being constructed at all.
+class SponsoredContextServiceKill: ClassHook<NSObject> {
+    typealias Group = SponsoredContextServiceGroup
+    static let targetName =
+        "_TtC35AdsEmbedded_AdsSponsoredContextImpl30AdsSponsoredContextServiceImpl"
+
+    func load() {
+        adlog("AdsSponsoredContextServiceImpl.load")
+        return
+    }
+}
+
+class SponsoredContextNPBAttachmentServiceKill: ClassHook<NSObject> {
+    typealias Group = SponsoredContextNPBAttachmentServiceGroup
+    static let targetName =
+        "_TtC48AdsEmbedded_AdsSponsoredContextNPBAttachmentImpl43AdsSponsoredContextNPBAttachmentServiceImpl"
+
+    func load() {
+        adlog("AdsSponsoredContextNPBAttachmentServiceImpl.load")
+        return
+    }
+}
+
+class SponsoredPlaylistHeaderServiceKill: ClassHook<NSObject> {
+    typealias Group = SponsoredPlaylistHeaderServiceGroup
+    static let targetName =
+        "_TtC42AdsEmbedded_AdsSponsoredPlaylistHeaderImpl37AdsSponsoredPlaylistHeaderServiceImpl"
+
+    func load() {
+        adlog("AdsSponsoredPlaylistHeaderServiceImpl.load")
+        return
+    }
+}
+
+// Rendering fallback for a sponsored header that was already materialized
+// before its service hook became active. Generic Spotify banners stay intact.
+class SponsoredPlaylistHeaderViewKill: ClassHook<UIView> {
+    typealias Group = SponsoredPlaylistHeaderViewGroup
+    static let targetName =
+        "_TtC18AdsPlatform_ECMKit37AdsSponsoredPlaylistHeaderCentralView"
+
+    func didMoveToSuperview() {
+        orig.didMoveToSuperview()
+        target.isHidden = true
+        target.isUserInteractionEnabled = false
+        if target.superview != nil {
+            adlog("AdsSponsoredPlaylistHeaderCentralView")
+            target.removeFromSuperview()
+        }
+    }
+}
+
 class NativeAdsLoggerServiceImplKill: ClassHook<NSObject> {
-    typealias Group = EeveeAdBlockerExtendedGroup
+    typealias Group = NativeAdsLoggerServiceGroup
     static let targetName: String = "_TtC20NativeAds_LoggerImpl26NativeAdsLoggerServiceImpl"
     func load() {
         if killNativeAdsLoggerService { adlog("NativeAdsLoggerServiceImpl.load"); return }
@@ -59,7 +151,7 @@ class NativeAdsLoggerServiceImplKill: ClassHook<NSObject> {
 // Passive log only — returning nil from init would crash the alloc chain.
 // Upstream events are starved by killing AdsServiceImpl above.
 class SponsoredCtxAttachmentProbe: ClassHook<NSObject> {
-    typealias Group = EeveeAdBlockerExtendedGroup
+    typealias Group = SponsoredCtxAttachmentGroup
     static let targetName: String =
         "_TtC48AdsEmbedded_AdsSponsoredContextNPBAttachmentImpl25AdModelChangedEventSource"
     func `init`() -> Target {
@@ -71,19 +163,52 @@ class SponsoredCtxAttachmentProbe: ClassHook<NSObject> {
 }
 
 func activateEeveeAdBlockerExtended() {
-    let probes: [String] = [
-        "_TtC19AdsPlatform_AdsImpl14AdsServiceImpl",
-        "_TtC29AdsNowPlaying_InStreamAdsImpl18InStreamAdsService",
-        "_TtC29AdsNowPlaying_EmbeddedNPVImpl22EmbeddedNPVServiceImpl",
-        "_TtC20NativeAds_LoggerImpl26NativeAdsLoggerServiceImpl",
+    let loadSelector = Selector(("load"))
+    let initSelector = Selector(("init"))
+
+    let loadTargets: [(String, String, () -> Void)] = [
+        (AdsServiceImplKill.targetName, "AdsServiceImpl", { AdsServiceImplGroup().activate() }),
+        (InStreamAdsServiceKill.targetName, "InStreamAdsService", { InStreamAdsServiceGroup().activate() }),
+        (EmbeddedNPVServiceImplKill.targetName, "EmbeddedNPVServiceImpl", { EmbeddedNPVServiceGroup().activate() }),
+        (LeavebehindAdsBaseServiceKill.targetName, "LeavebehindAdsBaseService", { LeavebehindAdsBaseServiceGroup().activate() }),
+        (LeavebehindAdsBaseInternalServiceKill.targetName, "LeavebehindAdsBaseInternalService", { LeavebehindAdsBaseInternalServiceGroup().activate() }),
+        (SponsoredContextServiceKill.targetName, "AdsSponsoredContextServiceImpl", { SponsoredContextServiceGroup().activate() }),
+        (SponsoredContextNPBAttachmentServiceKill.targetName, "AdsSponsoredContextNPBAttachmentServiceImpl", { SponsoredContextNPBAttachmentServiceGroup().activate() }),
+        (SponsoredPlaylistHeaderServiceKill.targetName, "AdsSponsoredPlaylistHeaderServiceImpl", { SponsoredPlaylistHeaderServiceGroup().activate() }),
+        (NativeAdsLoggerServiceImplKill.targetName, "NativeAdsLoggerServiceImpl", { NativeAdsLoggerServiceGroup().activate() }),
     ]
-    let presentCount = probes.filter { NSClassFromString($0) != nil }.count
-    NSLog("[EeveeSpotify][AdBlock] target classes resolved: %d/%d",
-          presentCount, probes.count)
-    guard presentCount > 0 else {
-        NSLog("[EeveeSpotify][AdBlock] no target classes present; skip activation")
-        return
+
+    var activated = 0
+    for (className, label, activate) in loadTargets {
+        guard let cls = NSClassFromString(className),
+              class_getInstanceMethod(cls, loadSelector) != nil else {
+            NSLog("[EeveeSpotify][AdBlock] %@/load unavailable; skipping", label)
+            continue
+        }
+        activate()
+        activated += 1
+        NSLog("[EeveeSpotify][AdBlock] %@ hook activated", label)
     }
-    EeveeAdBlockerExtendedGroup().activate()
-    NSLog("[EeveeSpotify][AdBlock] EeveeAdBlockerExtendedGroup activated")
+
+    if let cls = NSClassFromString(SponsoredCtxAttachmentProbe.targetName),
+       class_getInstanceMethod(cls, initSelector) != nil {
+        SponsoredCtxAttachmentGroup().activate()
+        activated += 1
+        NSLog("[EeveeSpotify][AdBlock] SponsoredCtxAttachment hook activated")
+    } else {
+        NSLog("[EeveeSpotify][AdBlock] SponsoredCtxAttachment/init unavailable; skipping")
+    }
+
+    let viewSelector = Selector(("didMoveToSuperview"))
+    if let cls = NSClassFromString(SponsoredPlaylistHeaderViewKill.targetName) as? UIView.Type,
+       class_getInstanceMethod(cls, viewSelector) != nil {
+        SponsoredPlaylistHeaderViewGroup().activate()
+        activated += 1
+        NSLog("[EeveeSpotify][AdBlock] SponsoredPlaylistHeader view fallback activated")
+    } else {
+        NSLog("[EeveeSpotify][AdBlock] SponsoredPlaylistHeader view unavailable; skipping")
+    }
+
+    NSLog("[EeveeSpotify][AdBlock] activated %d/%d compatible extended hooks",
+          activated, loadTargets.count + 2)
 }

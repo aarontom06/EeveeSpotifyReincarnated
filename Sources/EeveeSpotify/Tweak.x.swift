@@ -58,6 +58,25 @@ struct IOS14And15PremiumPatchingGroup: HookGroup { }
 struct V91PremiumPatchingGroup: HookGroup { } // For Spotify 9.1.x versions
 struct LatestPremiumPatchingGroup: HookGroup { }
 
+// Spotify 9.1.x originally removed the offline helper, so this version family
+// skipped the reminder hook entirely. Newer 9.1 builds expose the modern helper
+// again. Activate only that hook when its exact Objective-C entry point exists.
+func activateV91ServerSidedReminderIfAvailable() {
+    let className = ContentOffliningUIHelperImplementationModernHook.targetName
+    let selector = Selector((
+        "downloadToggledWithCurrentAvailability:addAction:removeAction:pageIdentifier:pageURI:interactionID:"
+    ))
+
+    guard let cls = NSClassFromString(className),
+          class_getInstanceMethod(cls, selector) != nil else {
+        writeDebugLog("[INIT] Server-sided download reminder unavailable on this 9.1.x build")
+        return
+    }
+
+    LatestPremiumPatchingGroup().activate()
+    writeDebugLog("[INIT] Activated server-sided download reminder for 9.1.x")
+}
+
 func activatePremiumPatchingGroup() {
     BasePremiumPatchingGroup().activate()
     
@@ -199,7 +218,7 @@ func eeveeEnvFlag(_ name: String) -> Bool {
 }
 
 struct EeveeSpotify: Tweak {
-    static let version = "6.6.4"
+    static let version = "6.6.8"
     static let buildNumber = "2"
     static let repoSlug = GeneratedConfig.repoSlug
     
@@ -221,14 +240,43 @@ struct EeveeSpotify: Tweak {
         }
     }
     
+    // MARK: - Non-fatal hook error handling
+    //
+    // Orion's default `handleError(_:)` forwards to `handleErrorDefault(_:)`, which logs
+    // and then calls `fatalError`, instantly killing the app. This fires for ANY hook that
+    // fails to activate - a missing target class, a renamed/removed selector, a method-add
+    // conflict, etc. Critically, this can happen for hooks in `DefaultGroup`
+    // (e.g. UIOpenURLContextHook, UIApplicationLiveContainerSharingHook), which Orion
+    // activates automatically during its init sequence, BEFORE `EeveeSpotify.init()` runs -
+    // so none of the NSClassFromString/selector guards below can protect against it.
+    //
+    // Since this codebase already treats individual hook groups as independently optional
+    // (kill switches, per-group existence checks, "minimal" fallbacks for 9.1.x), a single
+    // hook failing to bind on an unexpected Spotify/iOS build should degrade gracefully
+    // instead of taking down the whole app. Log it and move on.
+    static func handleError(_ error: OrionHookError) {
+        let description = error.description
+        NSLog("[EeveeSpotify][OrionError] Hook activation failed (non-fatal): %@", description)
+        writeDebugLog("[ORION ERROR] \(description)")
+        eeveeBreadcrumb("Orion hook activation failed (continuing): \(description)")
+        // Deliberately NOT calling handleErrorDefault(error) here - that is what fatalErrors.
+    }
+
     init() {
         eeveeBreadcrumb("Tweak init() entered")
         // Reset per-launch bootstrap state; this MUST NOT persist across restarts.
         // Otherwise Spotify can get stuck on splash because bootstrap is cancelled.
         UserDefaults.hasPatchedBootstrap = false
 
-        // Local-only premium force. Activated FIRST and unconditionally, before
-        // any version gating or kill-switch. Independent of patchType / bootstrap
+        // Recovery path for private-class changes: this must run before every
+        // manual hook activation, including ad and Premium banner blockers.
+        if eeveeEnvFlag("EEVEE_DISABLE_ALL") {
+            eeveeBreadcrumb("EEVEE_DISABLE_ALL=1 -> returning without hooks")
+            return
+        }
+
+        // Local-only premium force. Activated first after the recovery kill-switch,
+        // before version gating. Independent of patchType / bootstrap
         // patching / network interception. Keeps premium UI/state even if every
         // other Eevee path is disabled.
         activateEeveePremiumForce()
@@ -238,14 +286,26 @@ struct EeveeSpotify: Tweak {
         // TESTING: extended ad blocker (NPV/lyrics ad, home brand-ads, in-stream).
         activateEeveeAdBlockerExtended()
 
+        // Block premium upsell / "Like listening without limits?" popups.
+        activateUpsellPopupBlocker()
+
+        // Block the newer Swift service-backed Premium sheets/cards used by
+        // Spotify 9.1.x. Each target is runtime-gated for minor-version safety.
+        activateUpsellServiceBlocker()
+
+        // Block upsell components injected into Hub/home JSON (e.g. upgrade banners).
+        if NSClassFromString("HUBViewModelBuilderImplementation") != nil {
+            AdBlockerGroup().activate()
+            NSLog("[EeveeSpotify] AdBlockerGroup activated")
+        }
+
         // activateEeveeFlexGesture()
 
-        // Global kill-switch for debugging “instant crash / no logs”.
-        // If setting this makes Spotify launch, the crash is definitely in one of our hook activations.
-        if eeveeEnvFlag("EEVEE_DISABLE_ALL") {
-            eeveeBreadcrumb("EEVEE_DISABLE_ALL=1 -> returning without hooks")
-            return
-        }
+        // Clean Share Links: swizzle the concrete class of UIPasteboard.general in
+        // addition to the ClassHook<UIPasteboard> hooks — the general pasteboard is a
+        // private subclass whose overridden setters would otherwise bypass base-class
+        // swizzles. Installed unconditionally; cleaning is gated per-call by the toggle.
+        PasteboardConcreteSwizzler.install()
 
         // Activate session logout protection first.
         // NOTE: On some Spotify 9.1.x builds, Orion can still crash even if a selector exists
@@ -269,6 +329,12 @@ struct EeveeSpotify: Tweak {
         writeDebugLog("[INIT] Patch type: \(UserDefaults.patchType)")
         writeDebugLog("[INIT] Lyrics source: \(UserDefaults.lyricsSource)")
         writeDebugLog("[INIT] tweakInitTime: \(tweakInitTime)")
+
+        // CarPlay crash fix (Issue #16) — safe-gated
+        activateCarPlayCrashFix()
+
+        // Hysan's Elsa Recovery Fund: tappable donation toast on 5th launch
+        Donation.activate()
 
         // Verify critical hook targets exist
         let hookTargets: [(String, String)] = [
@@ -308,6 +374,8 @@ struct EeveeSpotify: Tweak {
                 } else {
                     writeDebugLog("[INIT] Skipped PremiumUIHooksGroup (missing HUBViewModelBuilderImplementation/addJSONDictionary:)")
                 }
+
+                activateV91ServerSidedReminderIfAvailable()
             }
 
             let lyricsEnabled = UserDefaults.lyricsSource.isReplacingLyrics
@@ -378,6 +446,7 @@ struct EeveeSpotify: Tweak {
             TrueShuffleHook.install()
             activateEeveeProbes()
             activateSponsorBlock()
+            activateKaraokeHooks()
             return
         }
 
@@ -417,5 +486,16 @@ struct EeveeSpotify: Tweak {
         }
         UniversalSettingsIntegrationNavGroup().activate()
         SettingsIntegrationGroup().activate()
+
+        // These were previously only activated in the 9.1.x branch above
+        // (before its early `return`) — meaning karaoke, SponsorBlock, and
+        // the debug probes never ran at all on the current/latest Spotify
+        // version, only on 9.1.x installs. Each of these functions already
+        // self-guards internally on its own enabled/feature flags (see
+        // activateSponsorBlock's `opts.enabled` check, for example), so
+        // it's safe to call them unconditionally here too.
+        activateEeveeProbes()
+        activateSponsorBlock()
+        activateKaraokeHooks()
     }
 }

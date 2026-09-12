@@ -1,16 +1,11 @@
 import Foundation
 import Orion
 
-// Captured Bearer token from any premium-relevant request — surfaced to
-// other modules (lyrics fetch, etc) that need to talk to Spotify's API.
+// Bearer token captured from premium-relevant requests; reused by lyrics fetch etc.
 public var spotifyAccessToken: String?
 
-// Hooks SPTDataLoaderService — Spotify's primary URLSession delegate for
-// wg-spclient.spotify.com traffic (first-fresh-login bootstrap, customize,
-// PAM endpoints).
-//
-// Patching logic lives in `SpotifyResponsePatcher` so the regional-route
-// hook (`HttpClientURLSessionHook`) can share it.
+// Spotify's primary URLSession delegate (wg-spclient: bootstrap, customize, PAM).
+// Patching lives in SpotifyResponsePatcher so HttpClientURLSessionHook can share it.
 
 class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
     typealias Group = PremiumBootstrapGroup
@@ -25,7 +20,12 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
            let headers = request.allHTTPHeaderFields,
            let auth = headers["Authorization"] ?? headers["authorization"],
            auth.hasPrefix("Bearer ") {
-            spotifyAccessToken = String(auth.dropFirst(7))
+            let token = String(auth.dropFirst(7))
+            spotifyAccessToken = token
+            // TEMP DEBUG: log token shape + source URL, never the token itself.
+            let dotCount = token.filter { $0 == "." }.count
+            let shape = "len=\(token.count) dots=\(dotCount) prefix=\(token.prefix(6))"
+            writeDebugLog("[TokenCapture] \(shape) from \(task.currentRequest?.url?.absoluteString ?? "<no url>")")
         }
 
         guard let url = task.currentRequest?.url else {
@@ -44,7 +44,7 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
         }
 
         // 304 already served — suppress the second completion.
-        if SpotifyResponsePatcher.handledCustomizeTasks.remove(task.taskIdentifier) != nil {
+        if SpotifyResponsePatcher.consumeCustomizeTask(task.taskIdentifier) {
             orig.URLSession(session, task: task, didCompleteWithError: nil)
             return
         }
@@ -61,7 +61,11 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
                 orig.URLSession(session, dataTask: task, didReceiveData: cached)
                 orig.URLSession(session, task: task, didCompleteWithError: nil)
             } else {
+                // Some Spotify builds complete "modified" tasks with 0 body bytes.
+                // Forwarding completion only can crash consumers that assume at least
+                // one didReceiveData callback before completion.
                 writeDebugLog("[DL] Missing buffered body for \(url.absoluteString) (taskId=\(task.taskIdentifier))")
+                orig.URLSession(session, dataTask: task, didReceiveData: Data())
                 // Always forward completion; otherwise Spotify may hang and get watchdog-killed.
                 orig.URLSession(session, task: task, didCompleteWithError: error)
             }
@@ -69,9 +73,20 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
         }
 
         do {
-            // Lyrics — async fetch with 5s budget, falls back to original on timeout.
+            // Lyrics — async fetch with 18s budget, falls back to Spotify's own response on failure.
+            //
+            // iOS 27 / Spotify 9.1.60 fix: Spotify's URLSession delegate handler for
+            // didReceiveData now accesses @MainActor-isolated state. When we call orig.*
+            // from the SPTDataLoaderService delegate queue (a background serial queue),
+            // Swift's strict concurrency runtime trips _swift_task_checkIsolatedSwift and
+            // kills the process with EXC_BREAKPOINT / SIGTRAP.
+            //
+            // Fix: dispatch the two orig.URLSession calls onto the main queue.
+            // This matches the execution context Spotify's renderer expects and eliminates
+            // the @MainActor isolation violation entirely.
             if url.isLyrics {
                 let originalLyrics = try? Lyrics(serializedBytes: buffer)
+
                 let semaphore = DispatchSemaphore(value: 0)
                 var customLyricsData: Data?
 
@@ -80,9 +95,12 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
                     semaphore.signal()
                 }
 
-                _ = semaphore.wait(timeout: .now() + .milliseconds(5000))
-                orig.URLSession(session, dataTask: task, didReceiveData: customLyricsData ?? buffer)
-                orig.URLSession(session, task: task, didCompleteWithError: nil)
+                _ = semaphore.wait(timeout: .now() + .milliseconds(18000))
+                let lyricsPayload = customLyricsData ?? buffer
+                DispatchQueue.main.async { [self] in
+                    orig.URLSession(session, dataTask: task, didReceiveData: lyricsPayload)
+                    orig.URLSession(session, task: task, didCompleteWithError: nil)
+                }
                 return
             }
 
@@ -92,9 +110,8 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
                 orig.URLSession(session, task: task, didCompleteWithError: nil)
                 return
             }
-            // patch() returned nil — no transform happened, but didReceiveData
-            // already suppressed the original. Replay the buffer or the
-            // consumer hangs forever (casita/browsita with no ad sections).
+            // patch() returned nil but didReceiveData already suppressed the original —
+            // replay the buffer or the consumer hangs (casita/browsita with no ad sections).
             orig.URLSession(session, dataTask: task, didReceiveData: buffer)
             orig.URLSession(session, task: task, didCompleteWithError: nil)
         } catch {
@@ -110,31 +127,49 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
     ) {
         if let url = task.currentRequest?.url, url.isCustomize, response.statusCode == 304,
            let cached = SpotifyResponsePatcher.cachedCustomizeData {
-            // Server says "not modified" — but our cached copy is the
-            // already-patched body, not whatever the server has. Replace
-            // the response status with 200 so the consumer accepts the
-            // cached data we hand it next.
-            let synthetic = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:])!
+            // 304, but our cache holds the already-patched body; force 200 so the
+            // consumer accepts the cached data we replay next.
+            guard let synthetic = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:]) else {
+                orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: handler)
+                return
+            }
             orig.URLSession(session, dataTask: task, didReceiveResponse: synthetic, completionHandler: handler)
             orig.URLSession(session, dataTask: task, didReceiveData: cached)
-            SpotifyResponsePatcher.handledCustomizeTasks.insert(task.taskIdentifier)
+            SpotifyResponsePatcher.markCustomizeTaskHandled(task.taskIdentifier)
             return
         }
 
         // Lyrics 4xx/5xx — replace with our custom fetch result so the
         // consumer doesn't show "no lyrics available".
+        //
+        // IMPORTANT: getLyricsDataForCurrentTrack is a blocking network call.
+        // Calling it synchronously here deadlocks because this delegate queue is
+        // also needed to deliver subsequent delegate callbacks (didReceiveData,
+        // didCompleteWithError). The fix is to fetch on a background queue while
+        // holding the URLSession completion handler open — URLSession won't
+        // proceed until we call handler(.allow/.cancel), so we have time to fetch
+        // and then deliver everything ourselves.
         guard let url = task.currentRequest?.url, url.isLyrics, response.statusCode != 200 else {
             orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: handler)
             return
         }
 
-        do {
-            let data = try getLyricsDataForCurrentTrack(url.path)
-            let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:])!
-            orig.URLSession(session, dataTask: task, didReceiveResponse: ok, completionHandler: handler)
-            orig.URLSession(session, dataTask: task, didReceiveData: data)
-        } catch {
-            orig.URLSession(session, task: task, didCompleteWithError: error)
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let data = try? getLyricsDataForCurrentTrack(url.path)
+
+            guard let lyricsData = data,
+                  let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:]) else {
+                // Fetch failed — let Spotify handle the original non-200 response.
+                handler(.allow)
+                orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: { _ in })
+                return
+            }
+
+            DispatchQueue.main.async { [self] in
+                orig.URLSession(session, dataTask: task, didReceiveResponse: ok, completionHandler: handler)
+                orig.URLSession(session, dataTask: task, didReceiveData: lyricsData)
+                orig.URLSession(session, task: task, didCompleteWithError: nil)
+            }
         }
     }
 

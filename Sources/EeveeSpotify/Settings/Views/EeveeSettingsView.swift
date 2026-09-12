@@ -1,3 +1,4 @@
+import EeveeSpotifyC
 import SwiftUI
 import UIKit
 
@@ -7,6 +8,8 @@ struct EeveeSettingsView: View {
     
     @State private var hasShownCommonIssuesTip = UserDefaults.hasShownCommonIssuesTip
     @State private var isClearingData = false
+    @State private var isPresentingDevNoteSheet = false
+
 
     private func confirmDestructive(
         title: String,
@@ -106,12 +109,12 @@ struct EeveeSettingsView: View {
             Button {
                 pushSettingsController(
                     with: SponsorBlockSettingsView(),
-                    title: "SponsorBlock (BETA)"
+                    title: "sponsorblock".localized
                 )
             } label: {
                 NavigationSectionView(
                     color: .red,
-                    title: "SponsorBlock (BETA)",
+                    title: "sponsorblock".localized,
                     imageSystemName: "forward.end.fill"
                 )
             }
@@ -119,17 +122,57 @@ struct EeveeSettingsView: View {
             Button {
                 pushSettingsController(
                     with: EeveeAppIconPickerView(),
-                    title: "App Icon"
+                    title: "appIcon".localized
                 )
             } label: {
                 NavigationSectionView(
                     color: .pink,
-                    title: "App Icon",
+                    title: "appIcon".localized,
                     imageSystemName: "app.badge.fill"
                 )
             }
 
+            Button {
+                pushSettingsController(
+                    with: EeveeMiscellaneousSettingsView(),
+                    title: "miscellaneous".localized
+                )
+            } label: {
+                NavigationSectionView(
+                    color: .gray,
+                    title: "miscellaneous".localized,
+                    imageSystemName: "ellipsis.circle.fill"
+                )
+            }
+
+            Button {
+                // spoti.pw is a UIKit page (an SGPage), not a SwiftUI view, so it's pushed
+                // directly onto the same navigation stack instead of going through
+                // pushSettingsController(with:title:), which wraps a SwiftUI view.
+                navigationController.pushViewController(SGModSettingsPage(), animated: true)
+            } label: {
+                NavigationSectionView(
+                    color: Color(hex: "#1ED760"),
+                    title: "spoti.pw",
+                    imageSystemName: "slider.horizontal.3"
+                )
+            }
+
             //
+
+            Section {
+                Button {
+                    isPresentingDevNoteSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "person.fill.questionmark")
+                        Text("\("developer_note".localized)...")
+                    }
+                }
+            }
+            .sheet(isPresented: $isPresentingDevNoteSheet) {
+                EeveeDevNoteView()
+            }
 
             Section(header: Text("debug_title".localized), footer: Text("debug_section_footer".localized)) {
                 Button {
@@ -200,12 +243,12 @@ struct EeveeSettingsView: View {
                 }
             }
 
-            Section(footer: Text("Force re-login. Wipes Spotify keychain entries, sandbox dirs, and app-group containers. Other sideloaded apps untouched. App exits when done.")) {
+            Section(footer: Text("resetFooter".localized)) {
                 Button {
                     confirmDestructive(
-                        title: "Full Reset",
-                        message: "Wipes Spotify keychain, sandbox dirs, and app-group containers. Forces re-login. App exits when done.",
-                        confirmTitle: "Full Reset"
+                        title: "resetButtonTitle".localized,
+                        message: "resetSubtitle".localized,
+                        confirmTitle: "resetButtonTitle".localized
                     ) {
                         isClearingData = true
                         DispatchQueue.global(qos: .userInitiated).async {
@@ -218,7 +261,7 @@ struct EeveeSettingsView: View {
                 } label: {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
-                        Text("Full Reset")
+                        Text("resetButtonTitle".localized)
                     }
                     .foregroundColor(.red)
                 }
@@ -235,7 +278,7 @@ struct EeveeSettingsView: View {
         
         .animation(.default, value: isClearingData)
         .animation(.default, value: hasShownCommonIssuesTip)
-        
+
         .onAppear {
             WindowHelper.shared.overrideUserInterfaceStyle(.dark)
         }

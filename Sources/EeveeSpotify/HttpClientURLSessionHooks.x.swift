@@ -17,7 +17,12 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
            let headers = request.allHTTPHeaderFields,
            let auth = headers["Authorization"] ?? headers["authorization"],
            auth.hasPrefix("Bearer ") {
-            spotifyAccessToken = String(auth.dropFirst(7))
+            let token = String(auth.dropFirst(7))
+            spotifyAccessToken = token
+            // TEMP DEBUG: log token shape + source URL, never the token itself.
+            let dotCount = token.filter { $0 == "." }.count
+            let shape = "len=\(token.count) dots=\(dotCount) prefix=\(token.prefix(6))"
+            writeDebugLog("[TokenCapture] \(shape) from \(task.currentRequest?.url?.absoluteString ?? "<no url>")")
         }
 
         guard let url = task.currentRequest?.url else {
@@ -35,7 +40,7 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
             return
         }
 
-        if SpotifyResponsePatcher.handledCustomizeTasks.remove(task.taskIdentifier) != nil {
+        if SpotifyResponsePatcher.consumeCustomizeTask(task.taskIdentifier) {
             orig.URLSession(session, task: task, didCompleteWithError: nil)
             return
         }
@@ -46,14 +51,17 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
         }
 
         guard let buffer = URLSessionHelper.shared.obtainData(for: task) else {
-            // We decided this URL should be modified, but we never captured any body bytes.
-            // This can happen with 0-byte responses, early completion, redirects, or concurrent callbacks.
-            // IMPORTANT: Always forward completion, otherwise Spotify may hang and get watchdog-killed.
+            // marked for modify but no body bytes (0-byte/early-completion/redirect).
+            // Always forward completion or Spotify hangs and gets watchdog-killed.
             if url.isCustomize, let cached = SpotifyResponsePatcher.cachedCustomizeData {
                 orig.URLSession(session, dataTask: task, didReceiveData: cached)
                 orig.URLSession(session, task: task, didCompleteWithError: nil)
             } else {
+                // Some Spotify builds complete "modified" tasks with 0 body bytes.
+                // We previously forwarded completion only, which can crash callers that
+                // assume at least one didReceiveData before completion.
                 writeDebugLog("[HCUS] Missing buffered body for \(url.absoluteString) (taskId=\(task.taskIdentifier))")
+                orig.URLSession(session, dataTask: task, didReceiveData: Data())
                 orig.URLSession(session, task: task, didCompleteWithError: error)
             }
             return
@@ -62,13 +70,14 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
         do {
             if url.isLyrics {
                 let originalLyrics = try? Lyrics(serializedBytes: buffer)
+
                 let semaphore = DispatchSemaphore(value: 0)
                 var customLyricsData: Data?
                 DispatchQueue.global(qos: .userInitiated).async {
                     customLyricsData = try? getLyricsDataForCurrentTrack(url.path, originalLyrics: originalLyrics)
                     semaphore.signal()
                 }
-                _ = semaphore.wait(timeout: .now() + .milliseconds(5000))
+                _ = semaphore.wait(timeout: .now() + .milliseconds(18000))
                 orig.URLSession(session, dataTask: task, didReceiveData: customLyricsData ?? buffer)
                 orig.URLSession(session, task: task, didCompleteWithError: nil)
                 return
@@ -97,10 +106,13 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
     ) {
         if let url = task.currentRequest?.url, url.isCustomize, response.statusCode == 304,
            let cached = SpotifyResponsePatcher.cachedCustomizeData {
-            let synthetic = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:])!
+            guard let synthetic = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:]) else {
+                orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: handler)
+                return
+            }
             orig.URLSession(session, dataTask: task, didReceiveResponse: synthetic, completionHandler: handler)
             orig.URLSession(session, dataTask: task, didReceiveData: cached)
-            SpotifyResponsePatcher.handledCustomizeTasks.insert(task.taskIdentifier)
+            SpotifyResponsePatcher.markCustomizeTaskHandled(task.taskIdentifier)
             return
         }
 
@@ -109,13 +121,22 @@ class HttpClientURLSessionHook: ClassHook<NSObject>, SpotifySessionDelegate {
             return
         }
 
-        do {
-            let data = try getLyricsDataForCurrentTrack(url.path)
-            let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:])!
+        // Fetch on a background queue while holding the completion handler open.
+        // Calling getLyricsDataForCurrentTrack synchronously here would block the
+        // delegate queue and prevent subsequent delegate callbacks from firing.
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let data = try? getLyricsDataForCurrentTrack(url.path)
+
+            guard let lyricsData = data,
+                  let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "2.0", headerFields: [:]) else {
+                handler(.allow)
+                orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: { _ in })
+                return
+            }
+
             orig.URLSession(session, dataTask: task, didReceiveResponse: ok, completionHandler: handler)
-            orig.URLSession(session, dataTask: task, didReceiveData: data)
-        } catch {
-            orig.URLSession(session, task: task, didCompleteWithError: error)
+            orig.URLSession(session, dataTask: task, didReceiveData: lyricsData)
+            orig.URLSession(session, task: task, didCompleteWithError: nil)
         }
     }
 

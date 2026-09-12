@@ -2,9 +2,8 @@
 
 # EeveeSpotifyReincarnated
 
-**Updated and maintained by [jaydenjcpy](https://github.com/jaydenjcpy) & [faroukbmiled](https://github.com/faroukbmiled)  - Current Version 9.1.48**
-
-**Last updated 5/16/26**
+**Maintainers:** [jaydenjcpy](https://github.com/jaydenjcpy) & [faroukbmiled](https://github.com/faroukbmiled) & [Mod4](https://github.com/M0d-4) <br />
+**Last Update:** `8/19/26` **Spotify Version:** `9.1.74`
 
 This tweak makes Spotify think you have a Premium subscription, granting free listening, just like Spotilife, and provides some additional features like custom lyrics.
 
@@ -13,9 +12,9 @@ This tweak makes Spotify think you have a Premium subscription, granting free li
 
 ## Custom Lyrics Support
 
-**Spotify 9.1.50 and above** - Full custom lyrics functionality is available with the following providers:
-
-- **Musixmatch**
+**Spotify 9.1.56 and above** - Full custom lyrics functionality is available with the following providers:
+- **Spicy Lyrics**
+- **Musixmatch(Requires Musixmatch Token)**
 - **PetitLyrics**
 - **LRCLIB**
 - **Genius**
@@ -46,11 +45,15 @@ This tweak makes Spotify think you have a Premium subscription, granting free li
 
 ## The History
 
-In January 2024, Spotilife, the only tweak to get Spotify Premium, stopped working on new Spotify versions. [whoeevee](https://github.com/whoeevee) decompiled Spotilife, reverse-engineered Spotify, intercepted requests, etc., and created this tweak.
+In January 2024, Spotilife, the only tweak to get Spotify Premium, stopped working on new Spotify versions. [whoeevee](https://github.com/whoeevee) decompiled Spotilife, reverse-engineered Spotify, intercepted requests, etc., and created EeveeSpotify.
 
-In December 2025, whoeevee, the maintainer of the EeveeSpotify tweak at the time, announced he'll be discontinuing the tweak because of the burden of keeping up with Spotify's constantly changing architectures. Soon after, [Meep1](https://github.com/Meeep1), forks the original Eevee repo and continues to develop the tweak to support newer Spotify versions, under the project name EeveeSpotiyRevivedPublic.
+In August 2025, the original EeveeSpotify repository was disabled following a [DMCA takedown](https://github.com/github/dmca/blob/master/2025/08/2025-08-14-spotify.md) by Spotify.
 
-In  March 2026, the latest EeveeSpotifyRevivedPublic release, v9.1.28, users experienced constant logging out issues and reported to Skye, however, at the time of this README.md written, EeveeSpotifyRevivedPublic hasn't released any newer updates. During March, I've been constantly annoyed by the logout issue and decided to take matters into my own hands and forked EeveeSpotifyRevivedPublic and fixed the logout issue, which will eventually lead to the creation of this repository, which will be continuing the legacy of EeveeSpotify for newer versions of Spotify.
+In December 2025, whoeevee, the maintainer of the EeveeSpotify tweak at the time, announced he would be discontinuing the tweak because of the burden of keeping up with Spotify's constantly changing architectures. Soon after, [Skye (@Meeep1)](https://github.com/Meeep1) forked the original Eevee repo and continued developing the tweak to support newer Spotify versions, under the project name EeveeSpotifyRevivedPublic.
+
+In March 2026, users of the latest EeveeSpotifyRevivedPublic release (v9.1.28) experienced constant logout issues and reported them to Skye, but EeveeSpotifyRevivedPublic hadn't released any newer updates. During March, I was constantly annoyed by the logout issue and decided to take matters into my own hands: I forked EeveeSpotifyRevivedPublic, fixed the logout issue, and that fork eventually became this repository — **EeveeSpotifyReincarnated** — continuing the legacy of EeveeSpotify for newer versions of Spotify.
+
+Today, EeveeSpotifyReincarnated is maintained by [jaydenjcpy](https://github.com/jaydenjcpy), [faroukbmiled](https://github.com/faroukbmiled), and [Mod4](https://github.com/M0d-4), keeping the tweak alive as Spotify keeps changing.
 
 
 
@@ -94,19 +97,45 @@ For sideloaded IPAs, we recommend using **SideStore** or certificate-based signi
 
 To open Spotify links in sideloaded app, use [OpenSpotifySafariExtension](https://github.com/BillyCurtis/OpenSpotifySafariExtension). Remember to activate it and allow access in Settings > Safari > Extensions.
 
+## Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening issues or pull requests.
+
+Contributions are welcome — bug fixes, new features, and translations alike. If you'd like to translate the tweak into your language or improve an existing localization, see [TRANSLATING.md](TRANSLATING.md) for the workflow, the rules, and the `Tools/l10n_lint.py` checker that validates your translation before you open a PR.
+
 ## Credits
-Thanks for all of the community's support, also, thanks to all the devs who worked along with me to revive this project Go check the other dev's out:
+Thanks for all of the community's support, also, thanks to all the devs who worked along with us to revive this project Go check the other dev's out:
 
-[Ryuk](https://github.com/faroukbmiled) - True Shuffle, App Icon, Support for Spotify v9.1.46 and above 
+[jaydenjcpy](https://github.com/jaydenjcpy)
 
-[Mod-4](https://github.com/M0d-4) - Custom Lyrics, iPadUI fix 
+[Ryuk](https://github.com/faroukbmiled) 
 
-[estrogencat](https://github.com/estrogencat) - Icon Fixes 
+[Mod4](https://github.com/M0d-4)
 
-[Skye](https://github.com/Meeep1) - EeveeSpotifyRevivedPublic, the base of this project 
+[estrogencat](https://github.com/estrogencat)
 
-[whoeevee](https://github.com/whoeevee) - EeveeSpotify & EeveeSpotifyReborn, where all this started
+[Skye](https://github.com/Meeep1) 
 
+[whoeevee](https://github.com/whoeevee) 
 
+[Spikerko](https://github.com/Spikerko)
 
+- This project is a fork of [Meeep1/EeveeSpotifyRevivedPublic](https://github.com/Meeep1/EeveeSpotifyRevivedPublic).
 
+## Disclaimer
+
+This project is an **independent modification (tweak)** for the Spotify app. We are **not affiliated, associated, authorized, endorsed by, or in any way officially connected with Spotify**, or any of its subsidiaries or affiliates. 
+
+This tweak is created solely for **personal and educational purposes**. Use it at your own risk.
+
+**We do not take any responsibility for any issues, damages, or consequences** resulting from the use or misuse of this tweak. If something breaks, it's not our problem.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=SideloadLabs%2FEeveeSpotifyReincarnated&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=SideloadLabs/EeveeSpotifyReincarnated&type=date&theme=dark&legend=top-left&sealed_token=C1hKWTv3UNdLAgsZjjCL7Rthp6YSGB4Mm9kIalnH1lgZXZnYVL09WbBt57E-FFzQXg8gZyFOW356S5XMTWmvQdIuEihF66WxqGuJTejmAdJx5XJHxC2l3A" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=SideloadLabs/EeveeSpotifyReincarnated&type=date&legend=top-left&sealed_token=C1hKWTv3UNdLAgsZjjCL7Rthp6YSGB4Mm9kIalnH1lgZXZnYVL09WbBt57E-FFzQXg8gZyFOW356S5XMTWmvQdIuEihF66WxqGuJTejmAdJx5XJHxC2l3A" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=SideloadLabs/EeveeSpotifyReincarnated&type=date&legend=top-left&sealed_token=C1hKWTv3UNdLAgsZjjCL7Rthp6YSGB4Mm9kIalnH1lgZXZnYVL09WbBt57E-FFzQXg8gZyFOW356S5XMTWmvQdIuEihF66WxqGuJTejmAdJx5XJHxC2l3A" />
+ </picture>
+</a>
